@@ -106,7 +106,7 @@ def check(argv: list[str] | None = None) -> int:
     from .register import ARCH, MODEL_TYPE, register as do_register
     done = do_register()
     engines = [k for k, v in done.items() if v]
-    print(f"voicing-serving-runtime {__import__('voicing_runtime').__version__}")
+    print(f"voicing-convo-llm-runtime {__import__('voicing_runtime').__version__}")
     print(f"  registered for: {', '.join(engines) if engines else 'nothing'}")
 
     if not any(done.get(e) for e in ("sglang", "vllm")):

@@ -4,7 +4,7 @@
     python tests/test_model_registration.py /path/to/Voicing-Convo-V2-35B-MOE
 
 The checkpoint declares `architectures: ["VoicingConvoForCausalLM"]` and
-`model_type: "voicing_convo"`. The installed `voicing-serving-runtime` package
+`model_type: "voicing_convo"`. The installed `voicing-convo-llm-runtime` package
 registers those names with whichever of transformers, SGLang, and vLLM is
 present. This test proves the registration on the installed versions, without
 loading weights:
