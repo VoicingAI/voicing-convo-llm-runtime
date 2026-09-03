@@ -152,18 +152,24 @@ def check(argv: list[str] | None = None) -> int:
         if os.path.isfile(idx_path):
             want = sorted(set(json.load(open(idx_path))["weight_map"].values()))
             missing = [f for f in want if not os.path.isfile(os.path.join(md, f))]
-            empty = [f for f in want if os.path.isfile(os.path.join(md, f))
-                     and os.path.getsize(os.path.join(md, f)) == 0]
+            # A half-written shard is present but short. Every safetensors file
+            # declares its own length in its header, so truncation is detectable
+            # locally, without the network.
+            empty = [f for f in want if f not in missing
+                     and _truncated(os.path.join(md, f))]
             partial = []
             dl = os.path.join(md, ".cache", "huggingface", "download")
             if os.path.isdir(dl):
                 partial = [f for f in os.listdir(dl) if f.endswith(".incomplete")]
             status = "ok" if not (missing or empty or partial) else "INCOMPLETE"
-            print(f"  shards: {len(want) - len(missing)}/{len(want)} present {status}")
+            good = len(want) - len(missing) - len(empty)
+            print(f"  shards: {good}/{len(want)} complete {status}")
             for f in missing[:5]:
                 print(f"            missing: {f}")
             if len(missing) > 5:
                 print(f"            ... and {len(missing) - 5} more")
+            for f in empty[:5]:
+                print(f"            truncated: {f}")
             for f in partial[:3]:
                 print(f"            still downloading: {f}")
             if missing or empty or partial:
@@ -180,6 +186,27 @@ def check(argv: list[str] | None = None) -> int:
 
     print("\nOK" if ok else "\nFAILED")
     return 0 if ok else 1
+
+
+def _truncated(path: str) -> bool:
+    """True if a safetensors file is shorter than its own header says it is."""
+    import json
+    import struct
+
+    try:
+        size = os.path.getsize(path)
+        if size < 8:
+            return True
+        with open(path, "rb") as fh:
+            n = struct.unpack("<Q", fh.read(8))[0]
+            if size < 8 + n:
+                return True
+            header = json.loads(fh.read(n))
+        end = max((v["data_offsets"][1] for k, v in header.items() if k != "__metadata__"),
+                  default=0)
+        return size < 8 + n + end
+    except Exception:
+        return True  # unreadable or malformed counts as not usable
 
 
 def _verify_weights(model_dir: str, shards: list[str]) -> bool:

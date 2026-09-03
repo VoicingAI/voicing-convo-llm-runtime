@@ -68,6 +68,35 @@ index, and `voicing-check --verify-weights "$MODEL_DIR"` additionally sha256s
 every shard against the Hub's published checksums when you want certainty that
 the bytes are right and not merely present.
 
+### If a few shards never finish
+
+Some hosts resolve the Hub to a CDN edge that drops long transfers. The symptom
+is distinctive: the loop above keeps running but the same one or two shards stay
+missing, and each pass adds only a few MB. Check which edge you are getting:
+
+```bash
+curl -sS -I -L -H "Authorization: Bearer $HF_TOKEN" \
+  "https://huggingface.co/voicing-ai/Voicing-Convo-V2-35B-MOE/resolve/main/model-00018-of-00021.safetensors" \
+  | grep -iE '^location|^x-amz-cf-pop'
+```
+
+`us.gcp.cdn.hf.co` has been unreliable from some machines; `us.aws.cdn.hf.co`
+has not. You cannot choose the edge, but `curl` with byte-range resume copes
+where the client library stalls. Fetch the stragglers directly:
+
+```bash
+BASE=https://huggingface.co/voicing-ai/Voicing-Convo-V2-35B-MOE/resolve/main
+for F in model-00018-of-00021.safetensors model-00019-of-00021.safetensors; do
+  for a in $(seq 1 60); do
+    curl -sS -L -C - --retry 5 --retry-all-errors -H "Authorization: Bearer $HF_TOKEN" \
+      -o "$MODEL_DIR/$F" "$BASE/$F" && break
+  done
+done
+```
+
+Then re-run `voicing-check --verify-weights "$MODEL_DIR"` to confirm the bytes
+match the Hub before serving.
+
 ## 3. Install the serving runtime
 
 Install it **after** the engine, into the same environment. It has no
@@ -286,7 +315,8 @@ and the one line in the Dockerfile. The model volume carries only the model.
 | `max_num_seqs (1024) exceeds available Mamba cache blocks` | vLLM default | `--max-num-seqs 256` (already set by `voicing-serve`) |
 | Empty `content`, `finish_reason: length` | thinking used the whole budget | raise `max_tokens`, or disable thinking |
 | `RemoteProtocolError: peer closed connection...` while downloading | normal on a 69 GB transfer | expected; the loop in step 2 resumes and refetches only what is missing |
-| Download looked finished but the model will not load | fewer than 21 shards; one `hf download` run often stops early | `ls "$MODEL_DIR"/model-*.safetensors \| wc -l`, then re-run the step 2 loop |
+| Download looked finished but the model will not load | fewer than 21 shards; one `hf download` run often stops early | `voicing-check "$MODEL_DIR"` names the missing shards; re-run the step 2 loop |
+| The same one or two shards never complete, each pass gaining only a few MB | the Hub resolved to a CDN edge that drops long transfers | use the `curl -C -` fallback in step 2 |
 
 ## What is in here
 
