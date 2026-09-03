@@ -3,8 +3,10 @@
 Serves **Voicing-Convo-V2-35B-MOE** on **vLLM** or **SGLang**. Install it after
 the engine and the stock commands just work.
 
+Replace `<owner>` below with wherever you host this repository.
+
 ```bash
-pip install "git+https://github.com/VoicingAI/voicing-serving-runtime.git"
+pip install "git+https://github.com/<owner>/voicing-serving-runtime.git"
 
 voicing-serve sglang --model /models/Voicing-Convo-V2-35B-MOE --port 8000
 voicing-serve vllm   --model /models/Voicing-Convo-V2-35B-MOE --port 8000
