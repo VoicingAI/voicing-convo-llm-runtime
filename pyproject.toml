@@ -8,18 +8,26 @@ version = "1.0.0"
 description = "Serving runtime for Voicing-Convo-V2-35B-MOE: architecture registration and reasoning/tool-call parsers for vLLM and SGLang"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 authors = [{ name = "Voicing AI" }]
-keywords = ["voicing", "vllm", "sglang", "llm-serving"]
+keywords = ["voicing", "vllm", "sglang", "llm-serving", "convo"]
 classifiers = [
-  "Private :: Do Not Upload",
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 # Deliberately no dependencies: this package is installed *after* an inference
 # engine and adapts to whichever one is present. Declaring vllm or sglang here
 # would drag in the other, or fight the engine's own pinned versions.
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/VoicingAI/voicing-convo-llm-runtime"
+Repository = "https://github.com/VoicingAI/voicing-convo-llm-runtime"
+Issues = "https://github.com/VoicingAI/voicing-convo-llm-runtime/issues"
 
 [project.optional-dependencies]
 test = ["transformers>=4.40"]
