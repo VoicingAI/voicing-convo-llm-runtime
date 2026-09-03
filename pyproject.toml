@@ -3,14 +3,14 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "voicing-convo-llm-runtime"
+name = "vtext-editor"
 version = "1.0.0"
-description = "Serving runtime for Voicing-Convo-V2-35B-MOE: architecture registration and reasoning/tool-call parsers for vLLM and SGLang"
+description = "vLLM and SGLang serving plugins: architecture registration, reasoning and tool-call parsers"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{ name = "Voicing AI" }]
-keywords = ["voicing", "vllm", "sglang", "llm-serving", "convo"]
+keywords = ["vtext", "voicing", "vllm", "sglang", "llm-serving"]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",

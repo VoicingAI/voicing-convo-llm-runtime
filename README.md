@@ -4,7 +4,7 @@ Serves **Voicing-Convo-V2-35B-MOE** on **vLLM** or **SGLang**. Install it after
 the engine and the stock commands just work.
 
 ```bash
-pip install voicing-convo-llm-runtime
+pip install vtext-editor
 
 voicing-serve sglang --model /models/Voicing-Convo-V2-35B-MOE --port 8000
 voicing-serve vllm   --model /models/Voicing-Convo-V2-35B-MOE --port 8000

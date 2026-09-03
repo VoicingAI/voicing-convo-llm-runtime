@@ -103,6 +103,9 @@ Install it **after** the engine, into the same environment. It has no
 dependencies of its own and adapts to whichever engine it finds.
 
 ```bash
+pip install vtext-editor
+
+# or from GitHub
 pip install "git+https://github.com/VoicingAI/voicing-convo-llm-runtime.git"
 ```
 
@@ -140,7 +143,7 @@ voicing-check "$MODEL_DIR"
 ```
 
 ```
-voicing-convo-llm-runtime 1.0.0
+vtext-editor 1.0.0
   registered for: transformers, sglang
   sglang: architecture=ok reasoning-parser=ok tool-call-parser=ok
   model:  /models/Voicing-Convo-V2-35B-MOE -> ['VoicingConvoForCausalLM'] / voicing_convo ok
@@ -251,7 +254,7 @@ vars, no plugin flags, nothing mounted beside the model.
 
 ```dockerfile
 FROM lmsysorg/sglang:v0.5.16
-RUN pip install "git+https://github.com/VoicingAI/voicing-convo-llm-runtime.git"
+RUN pip install vtext-editor
 ```
 
 ```yaml
