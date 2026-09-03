@@ -54,6 +54,30 @@ def serve(argv: list[str] | None = None) -> int:
     if not os.path.isfile(os.path.join(model, "config.json")):
         sys.exit(f"error: no config.json in {model}")
 
+    # Fail clearly on a busy port. Otherwise vLLM reports "Address already in
+    # use" from a worker traceback, and SGLang binds, then fails its own warmup
+    # request against whatever already owns the port -- typically an
+    # AssertionError with a 401, which points nowhere near the real cause.
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((args.host if args.host != "0.0.0.0" else "", int(args.port)))
+        except OSError:
+            owner = ""
+            try:
+                import subprocess
+                out = subprocess.run(["ss", "-ltnp"], capture_output=True, text=True, timeout=5).stdout
+                for line in out.splitlines():
+                    if f":{args.port} " in line:
+                        owner = line.split("users:")[-1].strip() if "users:" in line else line.strip()
+                        break
+            except Exception:
+                pass
+            sys.exit(f"error: port {args.port} is already in use{' by ' + owner if owner else ''}.\n"
+                     f"       Pick another with --port, or stop whatever is listening.")
+
     if args.engine == "sglang":
         cmd = [sys.executable, "-m", "sglang.launch_server",
                "--model", model, "--served-model-name", args.served_name,

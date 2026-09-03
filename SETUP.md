@@ -313,6 +313,8 @@ and the one line in the Dockerfile. The model volume carries only the model.
 | `No module named pip` when installing | the venv was created by `uv` | `uv pip install ...` |
 | `voicing-check` reports the wrong engine | you have more than one venv active, or `which python` is not the engine's | activate one venv in a clean shell and re-check |
 | `max_num_seqs (1024) exceeds available Mamba cache blocks` | vLLM default | `--max-num-seqs 256` (already set by `voicing-serve`) |
+| `error: port 8000 is already in use` | something else owns the port; on managed GPU hosts a portal or reverse proxy often does | `--port 18000`, or stop the listener. `voicing-serve` checks this before launching |
+| SGLang: `Initialization failed. warmup error ... AssertionError: res=<Response [401]>` | the port was taken, so SGLang's own warmup request reached the other service instead of itself | same as above; the message is misleading, the cause is the port |
 | Empty `content`, `finish_reason: length` | thinking used the whole budget | raise `max_tokens`, or disable thinking |
 | `RemoteProtocolError: peer closed connection...` while downloading | normal on a 69 GB transfer | expected; the loop in step 2 resumes and refetches only what is missing |
 | Download looked finished but the model will not load | fewer than 21 shards; one `hf download` run often stops early | `voicing-check "$MODEL_DIR"` names the missing shards; re-run the step 2 loop |
