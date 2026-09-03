@@ -37,21 +37,36 @@ engine source is modified and nothing is pip-installed.
 ```bash
 export HF_TOKEN=hf_...
 export MODEL_DIR=/models/Voicing-Convo-V2-35B-MOE
+export HF_HUB_DISABLE_XET=1
 
-HF_HUB_DISABLE_XET=1 hf download voicing-ai/Voicing-Convo-V2-35B-MOE \
-  --local-dir "$MODEL_DIR"
+# Expect several failures on a 69 GB transfer. Each pass resumes and only
+# refetches what is missing, so loop until all 21 shards are present.
+for i in $(seq 1 40); do
+  [ "$(ls "$MODEL_DIR"/model-*.safetensors 2>/dev/null | wc -l)" -eq 21 ] && break
+  hf download voicing-ai/Voicing-Convo-V2-35B-MOE --local-dir "$MODEL_DIR" && break
+  echo "pass $i incomplete, resuming..."; sleep 3
+done
 ```
 
 `HF_HUB_DISABLE_XET=1` makes each file a plain HTTP stream that resumes from its
-partial file if the transfer breaks. Re-run the same command to continue; it only
-refetches what is missing.
+partial file when a transfer breaks. **Do not skip the loop.** A single run of
+`hf download` frequently ends with
+`RemoteProtocolError: peer closed connection without sending complete message
+body` partway through, leaving a directory that looks nearly complete. On a
+recent clean install this needed six passes.
 
-Check the download before going further:
+Verify before going further, and treat the shard count as the gate: the
+directory size alone looks plausible while shards are still missing.
 
 ```bash
-ls "$MODEL_DIR"/model-*.safetensors | wc -l    # must be 21
+ls "$MODEL_DIR"/model-*.safetensors | wc -l    # must be 21, not "about 21"
 du -sh "$MODEL_DIR"                            # ~69 GB
 ```
+
+`voicing-check` in step 3 checks the shard count for you against the model
+index, and `voicing-check --verify-weights "$MODEL_DIR"` additionally sha256s
+every shard against the Hub's published checksums when you want certainty that
+the bytes are right and not merely present.
 
 ## 3. Install the serving runtime
 
@@ -270,7 +285,8 @@ and the one line in the Dockerfile. The model volume carries only the model.
 | `voicing-check` reports the wrong engine | you have more than one venv active, or `which python` is not the engine's | activate one venv in a clean shell and re-check |
 | `max_num_seqs (1024) exceeds available Mamba cache blocks` | vLLM default | `--max-num-seqs 256` (already set by `voicing-serve`) |
 | Empty `content`, `finish_reason: length` | thinking used the whole budget | raise `max_tokens`, or disable thinking |
-| Download dies mid-file, retries restart from zero | Xet chunk transfer | `HF_HUB_DISABLE_XET=1`, then re-run to resume |
+| `RemoteProtocolError: peer closed connection...` while downloading | normal on a 69 GB transfer | expected; the loop in step 2 resumes and refetches only what is missing |
+| Download looked finished but the model will not load | fewer than 21 shards; one `hf download` run often stops early | `ls "$MODEL_DIR"/model-*.safetensors \| wc -l`, then re-run the step 2 loop |
 
 ## What is in here
 

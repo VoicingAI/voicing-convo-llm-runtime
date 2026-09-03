@@ -101,6 +101,8 @@ def check(argv: list[str] | None = None) -> int:
                                 description="Check that this runtime registers with the installed engine.")
     p.add_argument("model", nargs="?", default=os.environ.get("VOICING_MODEL_DIR"),
                    help="model directory (default: $VOICING_MODEL_DIR)")
+    p.add_argument("--verify-weights", action="store_true",
+                   help="also sha256 every shard against the Hub's checksums (slow; needs HF_TOKEN)")
     args = p.parse_args(argv)
 
     from .register import ARCH, MODEL_TYPE, register as do_register
@@ -138,15 +140,84 @@ def check(argv: list[str] | None = None) -> int:
 
     if args.model:
         import json
-        cfg = json.load(open(os.path.join(os.path.abspath(args.model), "config.json")))
+        md = os.path.abspath(args.model)
+        cfg = json.load(open(os.path.join(md, "config.json")))
         good = cfg.get("architectures") == [ARCH] and cfg.get("model_type") == MODEL_TYPE
-        print(f"  model:  {args.model} -> {cfg.get('architectures')} / {cfg.get('model_type')} {'ok' if good else 'MISMATCH'}")
+        print(f"  model:  {md} -> {cfg.get('architectures')} / {cfg.get('model_type')} {'ok' if good else 'MISMATCH'}")
         ok &= good
+
+        # Completeness. An interrupted download leaves a directory that looks
+        # nearly right; the index names every shard that must be present.
+        idx_path = os.path.join(md, "model.safetensors.index.json")
+        if os.path.isfile(idx_path):
+            want = sorted(set(json.load(open(idx_path))["weight_map"].values()))
+            missing = [f for f in want if not os.path.isfile(os.path.join(md, f))]
+            empty = [f for f in want if os.path.isfile(os.path.join(md, f))
+                     and os.path.getsize(os.path.join(md, f)) == 0]
+            partial = []
+            dl = os.path.join(md, ".cache", "huggingface", "download")
+            if os.path.isdir(dl):
+                partial = [f for f in os.listdir(dl) if f.endswith(".incomplete")]
+            status = "ok" if not (missing or empty or partial) else "INCOMPLETE"
+            print(f"  shards: {len(want) - len(missing)}/{len(want)} present {status}")
+            for f in missing[:5]:
+                print(f"            missing: {f}")
+            if len(missing) > 5:
+                print(f"            ... and {len(missing) - 5} more")
+            for f in partial[:3]:
+                print(f"            still downloading: {f}")
+            if missing or empty or partial:
+                print("            re-run the download loop in SETUP.md step 2")
+            ok &= not (missing or empty or partial)
+
+            if args.verify_weights and not missing:
+                ok &= _verify_weights(md, want)
+        else:
+            print("  shards: no model.safetensors.index.json; cannot check completeness")
+            ok = False
     else:
         print("  model:  (not checked; pass a model directory or set VOICING_MODEL_DIR)")
 
     print("\nOK" if ok else "\nFAILED")
     return 0 if ok else 1
+
+
+def _verify_weights(model_dir: str, shards: list[str]) -> bool:
+    """sha256 every shard against the Hub's published checksums."""
+    import hashlib
+
+    try:
+        from huggingface_hub import HfApi
+    except ImportError:
+        print("  weights: huggingface_hub not installed; cannot verify")
+        return False
+    token = os.environ.get("HF_TOKEN")
+    try:
+        info = HfApi(token=token).model_info(DEFAULTS["served_name"], files_metadata=True)
+    except Exception as e:
+        print(f"  weights: could not reach the Hub ({type(e).__name__}); set HF_TOKEN")
+        return False
+    hub = {s.rfilename: s.lfs.sha256 for s in info.siblings if s.lfs}
+
+    bad, checked = [], 0
+    for name in shards:
+        want = hub.get(name)
+        if want is None:
+            continue
+        h = hashlib.sha256()
+        with open(os.path.join(model_dir, name), "rb") as fh:
+            for chunk in iter(lambda: fh.read(64 << 20), b""):
+                h.update(chunk)
+        checked += 1
+        if h.hexdigest() != want:
+            bad.append(name)
+        print(f"\r  weights: {checked}/{len(shards)} verified", end="", flush=True)
+    print()
+    if bad:
+        for f in bad:
+            print(f"            CORRUPT: {f}")
+        print("            delete those files and re-run the download loop")
+    return not bad
 
 
 if __name__ == "__main__":
