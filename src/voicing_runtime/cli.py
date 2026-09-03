@@ -238,8 +238,11 @@ def _verify_weights(model_dir: str, shards: list[str]) -> bool:
         checked += 1
         if h.hexdigest() != want:
             bad.append(name)
-        print(f"\r  weights: {checked}/{len(shards)} verified", end="", flush=True)
-    print()
+        if sys.stdout.isatty():
+            print(f"\r  weights: {checked}/{len(shards)} verified", end="", flush=True)
+    if sys.stdout.isatty():
+        print()
+    print(f"  weights: {checked}/{len(shards)} verified against the Hub")
     if bad:
         for f in bad:
             print(f"            CORRUPT: {f}")
