@@ -230,11 +230,12 @@ curl -s http://127.0.0.1:8000/v1/models
 python tests/smoke_live_api.py http://127.0.0.1:8000/v1
 ```
 
-The smoke test is engine-agnostic and must report `6/6 passed`:
+The smoke test is engine-agnostic and must report `7/7 passed`:
 
 1. default Voicing identity with no system message sent
 2. a tool call decoded into `tool_calls`, `finish_reason: tool_calls`
-3. streaming: reasoning deltas strictly before content, no tag leakage
+3. streaming: content streams cleanly with thinking off; with thinking on,
+   reasoning comes first and think tags never leak
 4. a system message mid-conversation is accepted
 5. a conversation that opens with an assistant turn is accepted
 6. a tool result replayed with `arguments` as a JSON string
