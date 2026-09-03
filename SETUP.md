@@ -29,7 +29,8 @@ engine source is modified and nothing is pip-installed.
 | GPU | 96 GB for `TP=1` at 64K context (bf16 weights are 69.3 GB). Smaller cards need `TP=2` or more. |
 | Engine | SGLang `0.5.16`, or vLLM `0.28.0`. Both verified. On Blackwell use CUDA 12.8+ builds. |
 | Python | 3.12, in the engine's own environment |
-| Token | `HF_TOKEN` with read access (the model repo is private) |
+| Model access | `HF_TOKEN` with read access to the private model repo |
+| Runtime access | credentials for the private GitHub repo (token, SSH deploy key, or a copied checkout) |
 
 ## 2. Download the model
 
@@ -61,18 +62,23 @@ dependencies of its own and adapts to whichever engine it finds.
 pip install "git+https://github.com/VoicingAI/voicing-serving-runtime.git"
 ```
 
-Alternatives, same result:
+The repository is private, so the machine needs credentials for it. Either
+configure `git` with a GitHub token or SSH key, or install from a checkout you
+have already copied over:
 
 ```bash
-# from the private Hugging Face mirror, using the token you already have.
-# Note: pip's "git+" installs use a partial clone, which the Hub does not
-# support, so clone first and install the directory.
-git clone https://user:$HF_TOKEN@huggingface.co/voicing-ai/voicing-serving-runtime
-pip install ./voicing-serving-runtime
+# with a GitHub personal access token
+pip install "git+https://$GITHUB_TOKEN@github.com/VoicingAI/voicing-serving-runtime.git"
 
-# from a local checkout or a copied tarball
+# over SSH, if the machine has a deploy key
+pip install "git+ssh://git@github.com/VoicingAI/voicing-serving-runtime.git"
+
+# from a local checkout or an unpacked tarball
 pip install /path/to/voicing-serving-runtime
 ```
+
+Pin a release when you want reproducible images: append `@v1.0.0` or `@<commit>`
+to any of the git URLs.
 
 > **`uv`-created virtualenvs have no `pip`.** If `python -m pip` reports
 > `No module named pip`, use `uv pip install ...` with the same argument. vLLM
