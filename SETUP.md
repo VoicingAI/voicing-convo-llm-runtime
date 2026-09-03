@@ -64,8 +64,11 @@ pip install "git+https://github.com/VoicingAI/voicing-serving-runtime.git"
 Alternatives, same result:
 
 ```bash
-# from the private Hugging Face mirror, using the token you already have
-pip install "git+https://user:$HF_TOKEN@huggingface.co/voicing-ai/voicing-serving-runtime"
+# from the private Hugging Face mirror, using the token you already have.
+# Note: pip's "git+" installs use a partial clone, which the Hub does not
+# support, so clone first and install the directory.
+git clone https://user:$HF_TOKEN@huggingface.co/voicing-ai/voicing-serving-runtime
+pip install ./voicing-serving-runtime
 
 # from a local checkout or a copied tarball
 pip install /path/to/voicing-serving-runtime
