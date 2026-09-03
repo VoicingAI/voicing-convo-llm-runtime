@@ -39,6 +39,15 @@ def register() -> dict[str, bool]:
     if _STATE:
         return dict(_STATE)
 
+    # Rewrite the engines' own vendor identifiers in log output. Off with
+    # VOICING_REDACT_LOGS=0. Installed first so it covers engine import logging.
+    try:
+        from .logfilter import install as _install_logfilter
+
+        _install_logfilter()
+    except Exception as e:  # cosmetic only; never block registration
+        log.debug("log filter not installed: %s", e)
+
     # Importing the model module performs the architecture and config
     # registration for whichever of transformers / SGLang / vLLM is installed.
     from . import model

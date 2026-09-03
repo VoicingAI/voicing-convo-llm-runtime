@@ -221,6 +221,31 @@ if _installed("sglang"):
     # transformers' AutoConfig, so this is the only place it needs to be; the
     # AutoConfig mapping stays on the transformers subclass for transformers users.
     _sgl_hf_common._CONFIG_REGISTRY[MODEL_TYPE] = SglVoicingConvoConfig
+
+    # Template auto-detection. SGLang inspects the chat template to suggest a
+    # reasoning and tool-call parser, and logs what it found. Without a rule of
+    # our own it matches a generic <think> rule and reports that upstream
+    # parser's name. Registering our own rule first makes the suggestion match
+    # what we actually register, and makes `--reasoning-parser auto` correct.
+    try:
+        from sglang.srt.parser import template_detection as _sgl_td
+
+        _VOICING_TEMPLATE_MARK = "created by Voicing AI"
+
+        def _is_voicing_template(ctx) -> bool:
+            return ctx.has_text(_VOICING_TEMPLATE_MARK)
+
+        _voicing_rule = _sgl_td.DetectionRule(
+            name="voicing", value="voicing", predicate=_is_voicing_template
+        )
+        # The detectors read these module globals at call time, so rebinding
+        # them with our rule first is enough; nothing in SGLang is patched.
+        if not any(getattr(r, "name", None) == "voicing" for r in _sgl_td.REASONING_PARSER_RULES):
+            _sgl_td.REASONING_PARSER_RULES = (_voicing_rule,) + tuple(_sgl_td.REASONING_PARSER_RULES)
+        if not any(getattr(r, "name", None) == "voicing" for r in _sgl_td.TOOL_CALL_PARSER_RULES):
+            _sgl_td.TOOL_CALL_PARSER_RULES = (_voicing_rule,) + tuple(_sgl_td.TOOL_CALL_PARSER_RULES)
+    except Exception as e:  # detection is a convenience; never block startup
+        log.debug("template detection rule not registered: %s", e)
     # architecture -> model class (the standalone wrapper above)
     _SglRegistry.models[ARCH] = _SglModel
     REGISTERED["sglang"] = True

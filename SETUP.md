@@ -290,6 +290,38 @@ containers:
 Compared with a stock deployment, the only differences are the two parser values
 and the one line in the Dockerfile. The model volume carries only the model.
 
+## Vendor names in engine logs
+
+Both engines log a few of their own internal identifiers that carry the upstream
+vendor's name. They are internal to vLLM and SGLang and cannot be renamed
+without patching those projects, so the runtime handles them two ways.
+
+**SGLang is fixed properly.** It inspects the chat template to suggest a parser
+and logs what it found. The runtime registers a detection rule for this model,
+so it reports `reasoning_parser=voicing, tool_call_parser=voicing` and
+`--reasoning-parser auto` resolves correctly.
+
+**vLLM is redacted at the logging layer.** Its kernel module filenames, warm-up
+message, and compiled custom-op names are rewritten on the way out by a
+`logging.Filter` the runtime installs. Nothing in vLLM is modified. The
+substitution keeps the meaningful part so lines stay traceable:
+
+| vLLM writes | you see |
+|---|---|
+| `[qwen_gdn_linear_attn.py:158]` | `[gdn_linear_attn.py:158]` |
+| `Warming up Qwen Triton kernels for model_type=qwen3_5_moe_text` | `Warming up GDN Triton kernels for model_type=voicing_convo` |
+| `vllm::qwen_gdn_attention_core` | `vllm::gdn_attention_core` |
+
+Verified: a full startup log from either engine contains zero matches for the
+vendor name.
+
+Set `VOICING_REDACT_LOGS=0` to disable the rewriting, for instance when
+reporting a bug upstream and you want the engine's own identifiers verbatim.
+
+> This is cosmetic and covers routine operational logs. The names still exist in
+> the installed engine's source, in `pip show`, and in tracebacks from a crash
+> inside those modules. It is not a security boundary.
+
 ## Client notes
 
 - **Give thinking room.** The model reasons at length even on short prompts.
