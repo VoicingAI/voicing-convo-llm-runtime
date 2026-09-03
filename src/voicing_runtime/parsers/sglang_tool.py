@@ -505,8 +505,8 @@ class VoicingToolDetector(BaseFormatDetector):
 
 
 # --- Registration -----------------------------------------------------------
-# Adds `--tool-call-parser voicing` to SGLang. Must be imported before
-# ServerArgs builds its argparse choices (see sitecustomize.py).
+# Adds `--tool-call-parser voicing` to SGLang. Imported by voicing_runtime.register,
+# which the sglang.srt.plugins entry point calls before argparse is built.
 from sglang.srt.function_call.function_call_parser import (  # noqa: E402
     FunctionCallParser,
 )

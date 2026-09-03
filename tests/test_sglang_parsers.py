@@ -15,7 +15,7 @@ Checks:
   3. `--reasoning-parser voicing --tool-call-parser voicing` pass argparse
   4. reasoning extraction, one-shot and streaming
   5. tool-call decoding, one-shot and streaming, including schema-typed args
-  6. the PYTHONPATH=<package>/voicing_runtime route registers in a fresh interpreter
+  6. SGLang's own plugin loader registers everything in a clean interpreter
 """
 
 import os
@@ -23,9 +23,6 @@ import subprocess
 import sys
 import traceback
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-PKG = os.path.abspath(os.path.join(HERE, os.pardir))
-PARSERS = os.path.join(PKG, "voicing_parsers", "sglang")
 MODEL_DIR = os.path.abspath(
     sys.argv[1] if len(sys.argv) > 1
     else os.environ.get("VOICING_MODEL_DIR")
@@ -53,13 +50,12 @@ def main():
         return 2
     print(f"SGLang {getattr(sglang, '__version__', '?')}  ({os.path.dirname(sglang.__file__)})")
 
-    if PARSERS not in sys.path:
-        sys.path.insert(0, PARSERS)
+    import voicing_runtime
+    voicing_runtime.register()
 
     # 1. import
     def _import():
-        import voicing_reasoning_detector  # noqa: F401
-        import voicing_tool_detector  # noqa: F401
+        from voicing_runtime.parsers import sglang_reasoning, sglang_tool  # noqa: F401
     check("detector modules import against installed SGLang", _import)
 
     # 2. registration
@@ -183,17 +179,16 @@ def main():
 
     # 6. fresh interpreter via PYTHONPATH — the deployment route
     def _fresh_interpreter():
-        # deployment uses PYTHONPATH=<package>/voicing_runtime, whose sitecustomize
-        # registers the parsers (and the model architecture)
-        env = dict(os.environ, PYTHONPATH=os.path.join(PKG, "voicing_runtime"))
-        code = ("import sys;"
+        # No PYTHONPATH: the engine loads the plugin entry point itself.
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        code = ("from sglang.srt.plugins import load_plugins; load_plugins();"
                 "from sglang.srt.parser.reasoning_parser import ReasoningParser as R;"
                 "from sglang.srt.function_call.function_call_parser import FunctionCallParser as F;"
                 "print('voicing' in R.DetectorMap and 'voicing' in F.ToolCallParserEnum)")
         out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=600)
         assert out.stdout.strip().endswith("True"), f"stdout={out.stdout!r}\nstderr={out.stderr[-800:]}"
         assert "[voicing] failed" not in out.stderr, out.stderr[-800:]
-    check("PYTHONPATH + sitecustomize registers in a fresh interpreter", _fresh_interpreter)
+    check("SGLang plugin loader registers everything in a clean interpreter", _fresh_interpreter)
 
     passed = sum(1 for ok, _, _ in results if ok)
     for ok, name, err in results:

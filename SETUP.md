@@ -52,44 +52,58 @@ ls "$MODEL_DIR"/model-*.safetensors | wc -l    # must be 21
 du -sh "$MODEL_DIR"                            # ~69 GB
 ```
 
-## 3. Install this package
+## 3. Install the serving runtime
 
-Put it anywhere the engine's Python can read. It is not pip-installed.
+Install it **after** the engine, into the same environment. It has no
+dependencies of its own and adapts to whichever engine it finds.
 
 ```bash
-export VOICING_RUNTIME=/opt/voicing-serving-runtime
-
-# clone it (private repo, same HF_TOKEN as the model)
-git clone https://user:$HF_TOKEN@huggingface.co/voicing-ai/voicing-serving-runtime \
-  "$VOICING_RUNTIME"
-# (any username works for read-only clones; pushing needs your real HF username)
-
-# or, without git:
-hf download voicing-ai/voicing-serving-runtime --local-dir "$VOICING_RUNTIME"
-
-# or, from a tarball you copied over:
-mkdir -p "$VOICING_RUNTIME" && tar xzf voicing-serving-runtime.tar.gz \
-  -C "$VOICING_RUNTIME" --strip-components=1
-
-chmod +x "$VOICING_RUNTIME"/scripts/*.sh
+pip install "git+https://github.com/VoicingAI/voicing-serving-runtime.git"
 ```
 
-In a Dockerfile, copy it into the serving image instead:
+Alternatives, same result:
 
-```dockerfile
-COPY voicing-serving-runtime /opt/voicing-serving-runtime
-ENV PYTHONPATH=/opt/voicing-serving-runtime/voicing_runtime
+```bash
+# from the private Hugging Face mirror, using the token you already have
+pip install "git+https://user:$HF_TOKEN@huggingface.co/voicing-ai/voicing-serving-runtime"
+
+# from a local checkout or a copied tarball
+pip install /path/to/voicing-serving-runtime
+```
+
+> **`uv`-created virtualenvs have no `pip`.** If `python -m pip` reports
+> `No module named pip`, use `uv pip install ...` with the same argument. vLLM
+> environments built with `uv venv` are the common case.
+
+That is the whole setup. Installing the package registers two plugin entry
+points, `vllm.general_plugins` and `sglang.srt.plugins`, which each engine loads
+by itself in the launcher, the engine core and every worker process. There is no
+`PYTHONPATH` to set, no plugin file paths to pass, and no engine source to edit.
+
+Confirm it took:
+
+```bash
+voicing-check "$MODEL_DIR"
+```
+
+```
+voicing-serving-runtime 1.0.0
+  registered for: transformers, sglang
+  sglang: architecture=ok reasoning-parser=ok tool-call-parser=ok
+  model:  /models/Voicing-Convo-V2-35B-MOE -> ['VoicingConvoForCausalLM'] / voicing_convo ok
+
+OK
 ```
 
 ## 4. Pre-flight checks
 
-Run these in the engine's Python environment, **before** starting a server. They
-take seconds, load no weights, and catch a version mismatch between this package
-and the installed engine — which is the one failure mode that otherwise shows up
-as a confusing crash at launch.
+`voicing-check` in step 3 covers the common case. The full suites go further and
+are worth running once per machine and after any engine upgrade. They take
+seconds and load no weights. Run them from a checkout of this repo, in the
+engine's Python environment:
 
 ```bash
-cd "$VOICING_RUNTIME"
+git clone https://github.com/VoicingAI/voicing-serving-runtime.git && cd voicing-serving-runtime
 
 # architecture + config resolve on the installed engine; checkpoint keys match
 python tests/test_model_registration.py "$MODEL_DIR"
@@ -107,74 +121,60 @@ line; a registration failure names the engine API that moved.
 
 ## 5. Start the server
 
-### SGLang
-
 ```bash
-MODEL_DIR="$MODEL_DIR" PORT=8000 TP=1 "$VOICING_RUNTIME/scripts/serve_sglang.sh"
+voicing-serve sglang --model "$MODEL_DIR" --port 8000
+voicing-serve vllm   --model "$MODEL_DIR" --port 8000
 ```
 
-That runs the stock entry point with `PYTHONPATH` set for you:
+`voicing-serve` builds a sensible command for the engine and execs it. Add
+`--dry-run` to print the command instead of running it. Common options:
+`--tp`, `--host`, `--port`, `--max-model-len`, `--gpu-memory-utilization`,
+`--served-model-name`. Anything else is passed through to the engine, and a flag
+you supply overrides the default of the same name:
 
 ```bash
-export PYTHONPATH="$VOICING_RUNTIME/voicing_runtime"
+voicing-serve sglang --model "$MODEL_DIR" --tp 2 --attention-backend triton
+voicing-serve vllm   --model "$MODEL_DIR" --tp 2 --enable-prefix-caching
+```
 
-python3 -m sglang.launch_server \
+### Or call the engines directly
+
+Nothing about `voicing-serve` is required; the package works with the stock
+commands because the parsers and the architecture are already registered.
+
+```bash
+python -m sglang.launch_server \
   --model "$MODEL_DIR" \
   --served-model-name voicing-ai/Voicing-Convo-V2-35B-MOE \
   --host 0.0.0.0 --port 8000 \
   --tp 1 --dtype bfloat16 \
   --mem-fraction-static 0.90 \
-  --attention-backend flashinfer \
-  --sampling-backend pytorch \
-  --reasoning-parser voicing \
-  --tool-call-parser voicing \
-  --context-length 65536 \
-  --chunked-prefill-size 4096
+  --attention-backend flashinfer --sampling-backend pytorch \
+  --reasoning-parser voicing --tool-call-parser voicing \
+  --context-length 65536 --chunked-prefill-size 4096
 ```
 
-Overrides: `PORT`, `TP`, `HOST`, `CONTEXT_LEN`, `MEM_FRACTION`, `ATTN_BACKEND`,
-`SERVED_NAME`. Extra flags are appended, e.g.
-`scripts/serve_sglang.sh --attention-backend triton`.
-
-### vLLM
-
 ```bash
-MODEL_DIR="$MODEL_DIR" PORT=8000 TP=1 "$VOICING_RUNTIME/scripts/serve_vllm.sh"
-```
-
-which runs:
-
-```bash
-export PYTHONPATH="$VOICING_RUNTIME/voicing_runtime"
-PARSERS="$VOICING_RUNTIME/voicing_parsers/vllm"
-
 vllm serve "$MODEL_DIR" \
   --served-model-name voicing-ai/Voicing-Convo-V2-35B-MOE \
   --host 0.0.0.0 --port 8000 \
   --tensor-parallel-size 1 --dtype bfloat16 \
   --gpu-memory-utilization 0.90 \
-  --max-model-len 65536 \
-  --max-num-seqs 256 \
-  --reasoning-parser-plugin "$PARSERS/voicing_reasoning_parser.py" \
+  --max-model-len 65536 --max-num-seqs 256 \
   --reasoning-parser voicing \
-  --tool-parser-plugin "$PARSERS/voicing_tool_parser.py" \
-  --enable-auto-tool-choice \
-  --tool-call-parser voicing
+  --enable-auto-tool-choice --tool-call-parser voicing
 ```
 
-Overrides: `PORT`, `TP`, `HOST`, `MAX_MODEL_LEN`, `GPU_MEM_UTIL`,
-`MAX_NUM_SEQS`, `SERVED_NAME`.
-
-**`--max-num-seqs 256` is required.** This architecture allots one Mamba cache
-block per decode sequence; vLLM's default of 1024 does not fit alongside the
-weights and fails CUDA-graph capture after the weights have loaded.
+**`--max-num-seqs 256` is required for vLLM.** This architecture allots one
+Mamba cache block per decode sequence; the default of 1024 does not fit
+alongside the weights and fails CUDA-graph capture after loading.
 
 ## 6. Verify the running server
 
 ```bash
 curl -s http://127.0.0.1:8000/v1/models
 
-python "$VOICING_RUNTIME/tests/smoke_live_api.py" http://127.0.0.1:8000/v1
+python tests/smoke_live_api.py http://127.0.0.1:8000/v1
 ```
 
 The smoke test is engine-agnostic and must report `6/6 passed`:
@@ -192,16 +192,18 @@ It takes a few minutes because thinking-mode generation is long.
 
 ## Kubernetes
 
-Only three things differ from a stock deployment: the `PYTHONPATH` env var, and
-the two parser names.
+Install the runtime into the serving image, then use the stock command. No env
+vars, no plugin flags, nothing mounted beside the model.
+
+```dockerfile
+FROM lmsysorg/sglang:v0.5.16
+RUN pip install "git+https://github.com/VoicingAI/voicing-serving-runtime.git"
+```
 
 ```yaml
 containers:
   - name: sglang
     command: ["python3", "-m", "sglang.launch_server"]
-    env:
-      - name: PYTHONPATH
-        value: /opt/voicing-serving-runtime/voicing_runtime
     args:
       - "--model"
       - "/mnt/models/llm/Voicing-Convo-V2-35B-MOE"
@@ -231,9 +233,8 @@ containers:
       - "4096"
 ```
 
-`/opt/voicing-serving-runtime` comes from the image (`COPY` it in) or from a
-mounted volume. The model volume needs only the model repo; this package must
-**not** be synced into it.
+Compared with a stock deployment, the only differences are the two parser values
+and the one line in the Dockerfile. The model volume carries only the model.
 
 ## Client notes
 
@@ -253,28 +254,31 @@ mounted volume. The model volume needs only the model repo; this package must
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Loads but is oddly slow, or fails later with an unknown `model_type` | `PYTHONPATH` not set. SGLang does **not** error on an unknown architecture, it silently falls back to its generic transformers backend | point `PYTHONPATH` at `<package>/voicing_runtime`, then re-run `tests/test_model_registration.py`, which asserts the fallback was not used |
-| `Model architecture VoicingConvoForCausalLM ... not supported` (vLLM) | `PYTHONPATH` not set, or pointing at the package root | it must point at `<package>/voicing_runtime` |
-| `argument --tool-call-parser: invalid choice: 'voicing'` | same as above, for SGLang | same |
-| `[voicing] failed to register ...` plus a traceback at startup | this package does not match the installed engine version | run `tests/test_model_registration.py`; the traceback names the moved API |
-| `max_num_seqs (1024) exceeds available Mamba cache blocks` | vLLM default | pass `--max-num-seqs 256` |
+| `argument --tool-call-parser: invalid choice: 'voicing'` | the runtime is not installed in the environment the engine runs in | `voicing-check`; install with the engine's own installer (see the `uv` note in step 3) |
+| Loads but is oddly slow, or fails later with an unknown `model_type` | same, on SGLang. It does **not** error on an unknown architecture, it silently falls back to its generic transformers backend | `voicing-check`, then `tests/test_model_registration.py`, which asserts the fallback was not used |
+| `Model architecture VoicingConvoForCausalLM ... not supported` (vLLM) | same | `voicing-check` |
+| `No module named pip` when installing | the venv was created by `uv` | `uv pip install ...` |
+| `voicing-check` reports the wrong engine | you have more than one venv active, or `which python` is not the engine's | activate one venv in a clean shell and re-check |
+| `max_num_seqs (1024) exceeds available Mamba cache blocks` | vLLM default | `--max-num-seqs 256` (already set by `voicing-serve`) |
 | Empty `content`, `finish_reason: length` | thinking used the whole budget | raise `max_tokens`, or disable thinking |
 | Download dies mid-file, retries restart from zero | Xet chunk transfer | `HF_HUB_DISABLE_XET=1`, then re-run to resume |
 
 ## What is in here
 
-See the layout table in [README.md](./README.md). In short:
-`voicing_runtime/` does the registration, `voicing_parsers/` holds the
-reasoning and tool-call parsers for each engine, `scripts/` has the launchers,
-and `tests/` has the checks used in sections 4 and 6.
-[`voicing_parsers/README.md`](./voicing_parsers/README.md) explains how each
-engine resolves parsers and why SGLang needs the `PYTHONPATH` route rather
-than a flag.
+```
+src/voicing_runtime/
+  register.py        the entry point both engines call
+  model.py           architecture + config registration, per engine
+  cli.py             voicing-serve, voicing-check
+  parsers/           reasoning and tool-call parsers for both engines
+tests/               the suites used in sections 4 and 6
+docs/PARSERS.md      how each engine resolves parsers, and why
+```
 
 ## Versioning
 
-The parsers and the registration shim are written against the released engine
+The parsers and the registration code are written against the released engine
 sources they were verified on: **SGLang 0.5.16** and **vLLM 0.28.0**. Both take
 their engine-side pieces from stable entry points, but an engine upgrade can
-still move an internal API. When you bump an engine, re-run the pre-flight
-checks in section 4 first. They fail loudly and name what moved.
+still move an internal API. After bumping an engine, run `voicing-check` and the
+section 4 suites before sending traffic. They fail loudly and name what moved.

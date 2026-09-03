@@ -1,7 +1,7 @@
 # Voicing Parsers
 
 > Deployment steps are in [SETUP.md](../SETUP.md). This file is the reference for
-> how each engine resolves parsers and why.
+> how each engine resolves parsers and why the package registers them the way it does.
 
 Reasoning and tool-call parsers for **Voicing-Convo-V2-35B-MOE**, packaged for
 [vLLM](https://github.com/vllm-project/vllm) and
@@ -37,13 +37,6 @@ These files register both under the name `voicing`.
     └── launch_voicing_server.py      # wrapper alternative to PYTHONPATH
 ```
 
-These files live in this package, not in the model repository. Set both paths:
-
-```bash
-MODEL_DIR=/models/Voicing-Convo-V2-35B-MOE          # downloaded weights
-VOICING_RUNTIME=/opt/voicing-serving-runtime        # this package
-```
-
 ## vLLM
 
 vLLM loads parsers from a file path, so both plugins are passed on the command
@@ -51,15 +44,14 @@ line. The model architecture registers through `PYTHONPATH` (it has to reach
 vLLM's engine-core process, which the plugin flags do not). No installation step.
 
 ```bash
-PYTHONPATH=$VOICING_RUNTIME/voicing_runtime \
 vllm serve $MODEL_DIR \
   --port 8000 \
   --tensor-parallel-size 8 \
   --max-model-len 262144 \
   --max-num-seqs 256 \
-  --reasoning-parser-plugin $VOICING_RUNTIME/voicing_parsers/vllm/voicing_reasoning_parser.py \
+  --reasoning-parser-plugin voicing_reasoning_parser.py \
   --reasoning-parser voicing \
-  --tool-parser-plugin $VOICING_RUNTIME/voicing_parsers/vllm/voicing_tool_parser.py \
+  --tool-parser-plugin voicing_tool_parser.py \
   --enable-auto-tool-choice \
   --tool-call-parser voicing
 ```
@@ -87,7 +79,6 @@ model architecture **and** both detectors — so the stock command works unchang
 (`voicing_parsers/sglang` still works as a PYTHONPATH target for compatibility):
 
 ```bash
-PYTHONPATH=$VOICING_RUNTIME/voicing_runtime \
 python -m sglang.launch_server \
   --model-path $MODEL_DIR \
   --port 8000 \
@@ -130,7 +121,7 @@ identity, tool calling, streaming, and the chat-template behaviours end to end:
 python tests/smoke_live_api.py http://127.0.0.1:8000/v1
 ```
 
-Ready-to-run launchers live in [`scripts/`](../scripts): `serve_sglang.sh` and
+The `voicing-serve` console command: `serve_sglang.sh` and
 `serve_vllm.sh`, parameterised by `MODEL_DIR`, `PORT`, `TP`, and friends, with
 any extra flags appended. Both were verified live (SGLang 0.5.16, vLLM 0.28.0)
 on an RTX PRO 6000. Note vLLM needs `--max-num-seqs` lowered (the script sets

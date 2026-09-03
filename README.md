@@ -1,16 +1,21 @@
-# Voicing Serving Runtime
+# voicing-serving-runtime
 
-Everything needed to serve **Voicing-Convo-V2-35B-MOE** on **vLLM** or **SGLang**,
-kept out of the model repository on purpose.
+Serves **Voicing-Convo-V2-35B-MOE** on **vLLM** or **SGLang**. Install it after
+the engine and the stock commands just work.
 
-**Start here: [SETUP.md](./SETUP.md)** is the step-by-step guide for a new machine.
+```bash
+pip install "git+https://github.com/VoicingAI/voicing-serving-runtime.git"
 
-> **Internal.** This package is deployed next to the inference engine: baked into
-> the serving image, cloned onto the host, or mounted. It must never be copied
-> into the published model repository, which contains only weights, tokenizer,
-> config, and chat template.
+voicing-serve sglang --model /models/Voicing-Convo-V2-35B-MOE --port 8000
+voicing-serve vllm   --model /models/Voicing-Convo-V2-35B-MOE --port 8000
+```
 
-## What it does
+**Full guide: [SETUP.md](./SETUP.md).**
+
+> **Internal.** Deliberately kept out of the published model repository, which
+> carries only weights, tokenizer, config, and chat template.
+
+## What installing it does
 
 The model declares its own architecture:
 
@@ -18,51 +23,45 @@ The model declares its own architecture:
 { "architectures": ["VoicingConvoForCausalLM"], "model_type": "voicing_convo" }
 ```
 
-Neither engine knows those names on its own, so the model does not load until
-this package is on `PYTHONPATH`. At interpreter startup it registers:
+Neither engine knows that name, and neither knows how to read the model's
+reasoning or its XML tool calls. This package declares two plugin entry points,
+`vllm.general_plugins` and `sglang.srt.plugins`, which each engine loads by
+itself in the launcher, the engine core, and every worker process. That
+registers:
 
 - the **architecture** and **config class**, with transformers, SGLang, and vLLM
-- the **`voicing` reasoning parser**, so thinking is returned separately from the answer
-- the **`voicing` tool-call parser**, so the model's XML tool calls arrive as normal OpenAI `tool_calls`
+- the **`voicing` reasoning parser**, so thinking comes back as a separate field
+- the **`voicing` tool-call parser**, so tool calls arrive as normal OpenAI `tool_calls`
 
-Registration happens in the server process and in every worker the engine spawns.
-No engine source is modified and nothing is pip-installed.
+No `PYTHONPATH`, no plugin file paths, no engine source changes, and no
+dependencies of its own.
+
+## Commands
+
+| | |
+|---|---|
+| `voicing-serve sglang \| vllm --model DIR` | build and run the engine command (`--dry-run` to print it) |
+| `voicing-check [DIR]` | confirm registration against the installed engine |
 
 ## Layout
 
 ```
-SETUP.md                       step-by-step deployment guide  <- start here
-voicing_runtime/
-  sitecustomize.py             auto-imported at startup; registers everything
-  voicing_convo.py             architecture + config registration, per engine
-voicing_parsers/
-  README.md                    how each engine resolves parsers, and why
-  sglang/
-    voicing_reasoning_detector.py    --reasoning-parser voicing
-    voicing_tool_detector.py         --tool-call-parser voicing
-    launch_voicing_server.py         wrapper alternative to PYTHONPATH
-  vllm/
-    voicing_parser_core.py           shared state machine (reasoning + tool calls)
-    voicing_reasoning_parser.py      --reasoning-parser voicing
-    voicing_tool_parser.py           --tool-call-parser voicing
-scripts/
-  serve_sglang.sh              parameterised launchers
-  serve_vllm.sh
-tests/
-  test_model_registration.py   architecture/config resolve; keys match checkpoint
-  test_chat_template.py        33 chat-template cases
-  test_sglang_parsers.py       12 parser cases against the installed SGLang
-  test_vllm_parsers.py          5 parser cases against the installed vLLM
-  smoke_live_api.py             6 end-to-end cases against a running server
+src/voicing_runtime/
+  register.py        the entry point both engines call
+  model.py           architecture + config registration, per engine
+  cli.py             voicing-serve, voicing-check
+  parsers/           reasoning and tool-call parsers for both engines
+tests/               five suites: registration, chat template, both parsers, live smoke
+docs/PARSERS.md      how each engine resolves parsers, and why
 ```
 
 ## Verified against
 
 | Engine | Version | Pre-flight | Live smoke test |
 |---|---|---|---|
-| SGLang | 0.5.16 | 12/12 + 3/3 + 33/33 | 6/6 |
-| vLLM | 0.28.0 | 5/5 + 3/3 | 6/6 |
+| SGLang | 0.5.16 | 3/3 + 12/12 + 33/33 | 6/6 |
+| vLLM | 0.28.0 | 3/3 + 5/5 + 33/33 | 6/6 |
 
-An engine upgrade can move an internal API. Re-run the pre-flight checks in
-[SETUP.md](./SETUP.md) section 4 after any upgrade; they fail loudly and name
+An engine upgrade can move an internal API. Run `voicing-check` and the suites
+in [SETUP.md](./SETUP.md) section 4 after any upgrade; they fail loudly and name
 what moved.

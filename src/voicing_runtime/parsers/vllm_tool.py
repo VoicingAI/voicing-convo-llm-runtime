@@ -1,27 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """Voicing tool-call parser plugin for vLLM.
 
-Registers the tool parser under the name ``voicing``.
-
-    vllm serve voicing-ai/Voicing-Convo-V2-35B-MOE \
-      --tool-parser-plugin /path/to/voicing_parsers/vllm/voicing_tool_parser.py \
-      --enable-auto-tool-choice --tool-call-parser voicing
+Registered under the name ``voicing`` by :func:`voicing_runtime.register.register`,
+which the ``vllm.general_plugins`` entry point calls in every vLLM process. No
+``--tool-parser-plugin`` flag is needed; just ``--tool-call-parser voicing``.
 """
 
-import os
-import sys
+from vllm.parser.engine.adapters import make_adapters
+from vllm.tool_parsers import ToolParserManager
 
-# vLLM loads this file with ``import_from_path(basename, path)``, which does not
-# put the plugin's own directory on sys.path. Do it here so the shared core
-# module below resolves.
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-
-from vllm.parser.engine.adapters import make_adapters  # noqa: E402
-from vllm.tool_parsers import ToolParserManager  # noqa: E402
-
-from voicing_parser_core import VoicingParser  # noqa: E402
+from .vllm_core import VoicingParser
 
 _VoicingReasoningAdapter, _VoicingToolAdapter = make_adapters(VoicingParser)
 

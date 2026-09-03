@@ -4,9 +4,10 @@
     python tests/test_model_registration.py /path/to/Voicing-Convo-V2-35B-MOE
 
 The checkpoint declares `architectures: ["VoicingConvoForCausalLM"]` and
-`model_type: "voicing_convo"`. voicing_runtime/voicing_convo.py registers those
-names with whichever of transformers, SGLang, and vLLM is installed. This test
-proves the registration on the installed versions, without loading weights:
+`model_type: "voicing_convo"`. The installed `voicing-serving-runtime` package
+registers those names with whichever of transformers, SGLang, and vLLM is
+present. This test proves the registration on the installed versions, without
+loading weights:
 
   * transformers: AutoConfig -> VoicingConvoConfig, AutoModelForCausalLM ->
     VoicingConvoForCausalLM (meta device), and its parameter names match the
@@ -30,9 +31,6 @@ import re
 import sys
 import traceback
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-PKG = os.path.abspath(os.path.join(HERE, os.pardir))
-RUNTIME = os.path.join(PKG, "voicing_runtime")
 MODEL_DIR = os.path.abspath(
     sys.argv[1] if len(sys.argv) > 1
     else os.environ.get("VOICING_MODEL_DIR")
@@ -56,16 +54,11 @@ def have(mod):
 
 
 def main():
-    # Execute the package's sitecustomize exactly as a deployed interpreter
-    # would, so this test exercises the real registration path (model + parsers).
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("_voicing_bootstrap", os.path.join(RUNTIME, "sitecustomize.py"))
-    boot = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(boot)
-    if RUNTIME not in sys.path:
-        sys.path.insert(0, RUNTIME)
-    import voicing_convo
-    print("registered for:", [k for k, v in voicing_convo._REGISTERED.items() if v])
+    # Call the same entry point the engines call through their plugin systems.
+    import voicing_runtime
+    import voicing_runtime.model as voicing_convo
+    done = voicing_runtime.register()
+    print("registered for:", [k for k, v in done.items() if v])
 
     def _no_vendor_strings():
         hits = []

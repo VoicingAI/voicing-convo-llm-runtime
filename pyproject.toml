@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voicing-serving-runtime"
+version = "1.0.0"
+description = "Serving runtime for Voicing-Convo-V2-35B-MOE: architecture registration and reasoning/tool-call parsers for vLLM and SGLang"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Voicing AI" }]
+keywords = ["voicing", "vllm", "sglang", "llm-serving"]
+classifiers = [
+  "Private :: Do Not Upload",
+  "Programming Language :: Python :: 3",
+]
+
+# Deliberately no dependencies: this package is installed *after* an inference
+# engine and adapts to whichever one is present. Declaring vllm or sglang here
+# would drag in the other, or fight the engine's own pinned versions.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["transformers>=4.40"]
+
+[project.scripts]
+voicing-serve = "voicing_runtime.cli:serve"
+voicing-check = "voicing_runtime.cli:check"
+
+# Loaded by vLLM in the launcher, engine core and every worker process.
+[project.entry-points."vllm.general_plugins"]
+voicing_convo = "voicing_runtime.register:register"
+
+# Loaded by SGLang in launch_server (before argparse), the engine and the scheduler.
+[project.entry-points."sglang.srt.plugins"]
+voicing_convo = "voicing_runtime.register:register"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+voicing_runtime = ["py.typed"]

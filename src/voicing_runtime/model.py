@@ -8,16 +8,16 @@ The checkpoint declares its own identity:
 
 Each engine resolves those two strings through a registry. This module registers
 them, at import time, against the engine classes that implement this hybrid
-Gated-DeltaNet / MoE architecture -- no engine source is modified. It is loaded
-automatically by ``sitecustomize.py`` in this directory when the directory is on
-``PYTHONPATH``, or can be imported explicitly:
+Gated-DeltaNet / MoE architecture -- no engine source is modified.
 
-    import voicing_convo  # registers for whichever engines are installed
+Importing this module performs the registration. It is imported by
+:func:`voicing_runtime.register.register`, which both engines call through their
+plugin entry points, so nothing here needs to be invoked by hand.
 
 All classes are defined at module level on purpose: SGLang and vLLM pickle the
 model config to spawn worker processes, and only module-level classes pickle by
-reference. Each worker re-imports this module via sitecustomize before
-unpickling, so the reference resolves.
+reference. Each worker loads the plugin entry point before unpickling, so the
+reference resolves.
 
 An engine that is not installed is skipped silently; an engine whose API has
 moved raises loudly.

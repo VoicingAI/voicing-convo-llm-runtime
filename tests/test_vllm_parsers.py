@@ -15,9 +15,6 @@ import os
 import sys
 import traceback
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-PKG = os.path.abspath(os.path.join(HERE, os.pardir))
-PARSERS = os.path.join(PKG, "voicing_parsers", "vllm")
 MODEL_DIR = os.path.abspath(
     sys.argv[1] if len(sys.argv) > 1
     else os.environ.get("VOICING_MODEL_DIR")
@@ -50,11 +47,11 @@ def main():
 
     # 1. load the plugin files the way the server does
     def _load():
-        ReasoningParserManager.import_reasoning_parser(os.path.join(PARSERS, "voicing_reasoning_parser.py"))
-        ToolParserManager.import_tool_parser(os.path.join(PARSERS, "voicing_tool_parser.py"))
+        import voicing_runtime
+        voicing_runtime.register()
         ReasoningParserManager.get_reasoning_parser("voicing")
         ToolParserManager.get_tool_parser("voicing")
-    check("plugin files load and register as 'voicing'", _load)
+    check("package registers both parsers as 'voicing' (no plugin flags)", _load)
 
     def _tok():
         from transformers import AutoTokenizer

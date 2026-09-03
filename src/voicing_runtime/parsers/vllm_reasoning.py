@@ -1,27 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """Voicing reasoning parser plugin for vLLM.
 
-Registers the reasoning parser under the name ``voicing``.
-
+Registered under the name ``voicing`` by :func:`voicing_runtime.register.register`,
+which the ``vllm.general_plugins`` entry point calls in every vLLM process. No
+``--reasoning-parser-plugin`` flag is needed; just ``--reasoning-parser voicing``.
     vllm serve voicing-ai/Voicing-Convo-V2-35B-MOE \
       --reasoning-parser-plugin /path/to/voicing_parsers/vllm/voicing_reasoning_parser.py \
       --reasoning-parser voicing
 """
 
-import os
-import sys
+from vllm.parser.engine.adapters import make_adapters
+from vllm.reasoning import ReasoningParserManager
 
-# vLLM loads this file with ``import_from_path(basename, path)``, which does not
-# put the plugin's own directory on sys.path. Do it here so the shared core
-# module below resolves.
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-
-from vllm.parser.engine.adapters import make_adapters  # noqa: E402
-from vllm.reasoning import ReasoningParserManager  # noqa: E402
-
-from voicing_parser_core import VoicingParser  # noqa: E402
+from .vllm_core import VoicingParser
 
 VoicingReasoningParser, _VoicingToolAdapter = make_adapters(VoicingParser)
 
