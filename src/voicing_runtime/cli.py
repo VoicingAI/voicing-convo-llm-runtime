@@ -185,7 +185,10 @@ def check(argv: list[str] | None = None) -> int:
             dl = os.path.join(md, ".cache", "huggingface", "download")
             if os.path.isdir(dl):
                 partial = [f for f in os.listdir(dl) if f.endswith(".incomplete")]
-            status = "ok" if not (missing or empty or partial) else "INCOMPLETE"
+            # Leftover .incomplete files are stale artifacts of an interrupted
+            # download. They waste disk but say nothing about the shards that
+            # actually landed, so they must not fail the check on their own.
+            status = "ok" if not (missing or empty) else "INCOMPLETE"
             good = len(want) - len(missing) - len(empty)
             print(f"  shards: {good}/{len(want)} complete {status}")
             for f in missing[:5]:
@@ -194,11 +197,15 @@ def check(argv: list[str] | None = None) -> int:
                 print(f"            ... and {len(missing) - 5} more")
             for f in empty[:5]:
                 print(f"            truncated: {f}")
-            for f in partial[:3]:
-                print(f"            still downloading: {f}")
-            if missing or empty or partial:
+            if missing or empty:
+                for f in partial[:3]:
+                    print(f"            still downloading: {f}")
                 print("            re-run the download loop in SETUP.md step 2")
-            ok &= not (missing or empty or partial)
+            elif partial:
+                waste = sum(os.path.getsize(os.path.join(dl, f)) for f in partial) / 2**30
+                print(f"            note: {len(partial)} stale .incomplete file(s) "
+                      f"({waste:.1f} GiB) left in {os.path.relpath(dl, md)}; safe to delete")
+            ok &= not (missing or empty)
 
             if args.verify_weights and not missing:
                 ok &= _verify_weights(md, want)
