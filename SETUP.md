@@ -60,8 +60,9 @@ Put it anywhere the engine's Python can read. It is not pip-installed.
 export VOICING_RUNTIME=/opt/voicing-serving-runtime
 
 # clone it (private repo, same HF_TOKEN as the model)
-git clone https://voicing:$HF_TOKEN@huggingface.co/voicing-ai/voicing-serving-runtime \
+git clone https://user:$HF_TOKEN@huggingface.co/voicing-ai/voicing-serving-runtime \
   "$VOICING_RUNTIME"
+# (any username works for read-only clones; pushing needs your real HF username)
 
 # or, without git:
 hf download voicing-ai/voicing-serving-runtime --local-dir "$VOICING_RUNTIME"
