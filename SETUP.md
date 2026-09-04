@@ -317,6 +317,7 @@ so lines stay traceable:
 | `vllm::qwen_gdn_attention_core` | `vllm::gdn_attention_core` |
 | `Load weight end. type=Qwen3_5MoeForConditionalGeneration` | `Load weight end. type=VoicingConvoForConditionalGeneration` |
 | `[ERROR] \`loss\` is part of Qwen3_5Moe... not documented` | *(dropped — docstring lint, not a load failure)* |
+| any leftover `qwen` / `Qwen` / `QWEN` | `voicing` / `Voicing` / `VOICING` |
 
 Verified: a full startup log from either engine contains zero matches for the
 vendor name.

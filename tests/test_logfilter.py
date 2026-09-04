@@ -49,11 +49,15 @@ DOC_ERR_VL = (
 )
 
 
+def _assert_no_qwen(text: str) -> None:
+    assert "qwen" not in text.lower(), text
+
+
 def _redact_cases():
     from voicing_runtime.logfilter import _redact
 
     got = _redact("Load weight end. type=Qwen3_5MoeForConditionalGeneration")
-    assert "qwen" not in got.lower(), got
+    _assert_no_qwen(got)
     assert "VoicingConvo" in got, got
 
     got = _redact("model_type=qwen3_5_moe_text")
@@ -61,6 +65,17 @@ def _redact_cases():
 
     got = _redact("[qwen_gdn_linear_attn.py:158]")
     assert got == "[gdn_linear_attn.py:158]", got
+
+    leftovers = (
+        "Using fa3 as multimodal attention backend for Qwen2_5_VL",
+        "File /usr/lib/python3.13/site-packages/transformers/models/qwen3_5_moe/modeling_qwen3_5_moe.py",
+        "QWEN_BAR failed; Qwen2MoeForCausalLM; hello qWenMix",
+        "incompatible with multimodal model qwen2.5-vl",
+    )
+    for raw in leftovers:
+        got = _redact(raw)
+        _assert_no_qwen(got)
+        assert "voicing" in got.lower(), got
 
 
 def _drop_docstring_print():
@@ -109,11 +124,63 @@ def _logging_drops_docstring_lint():
     assert VoicingLogFilter().filter(record) is False
 
 
+def _handler_stream_captured_before_install():
+    """A StreamHandler created on the real stderr must still redact after install()."""
+    from voicing_runtime import logfilter as lf
+
+    lf._INSTALLED = False
+    os.environ.pop("VOICING_REDACT_LOGS", None)
+    buf = io.StringIO()
+    handler = logging.StreamHandler(buf)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    log = logging.getLogger("voicing_runtime_test_qwen_leak")
+    log.handlers[:] = [handler]
+    log.propagate = False
+    log.setLevel(logging.INFO)
+    try:
+        assert lf.install()
+        log.info("Load weight end. type=Qwen2MoeForCausalLM path=qwen3_5_moe")
+        log.error("traceback File .../models/qwen2_5_vl/modeling_qwen2_5_vl.py")
+    finally:
+        log.handlers.clear()
+        lf._INSTALLED = False
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+    out = buf.getvalue()
+    _assert_no_qwen(out)
+    assert "voicing" in out.lower(), out
+
+
+def _stderr_and_exc_have_no_qwen():
+    from voicing_runtime import logfilter as lf
+
+    lf._INSTALLED = False
+    os.environ.pop("VOICING_REDACT_LOGS", None)
+    out_buf, err_buf = io.StringIO(), io.StringIO()
+    sys.stdout, sys.stderr = out_buf, err_buf
+    try:
+        assert lf.install()
+        print("stdout Qwen3Moe", file=sys.stdout)
+        print("stderr QWEN_KERNEL", file=sys.stderr)
+        try:
+            raise RuntimeError("failed loading qwen3_5_moe")
+        except RuntimeError:
+            sys.stderr.write("".join(__import__("traceback").format_exc()))
+    finally:
+        lf._INSTALLED = False
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+    _assert_no_qwen(out_buf.getvalue())
+    _assert_no_qwen(err_buf.getvalue())
+
+
 if __name__ == "__main__":
     check("redact: PascalCase class + lowercase ids", _redact_cases)
     check("stdout: drop HF docstring [ERROR] prints, keep other lines", _drop_docstring_print)
     check("logging.Filter: PascalCase class name", _logging_pascalcase)
     check("logging.Filter: drop docstring lint records", _logging_drops_docstring_lint)
+    check("StreamHandler attached before install() still redacts", _handler_stream_captured_before_install)
+    check("stderr / traceback writes have no leftover qwen", _stderr_and_exc_have_no_qwen)
     failed = 0
     for ok, name, info in results:
         print(("ok   " if ok else "FAIL ") + name + (f"  {info}" if info else ""))

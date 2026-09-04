@@ -16,13 +16,15 @@ meaningful part rather than inventing a new name, so log lines stay traceable:
     model_type=qwen3_5_moe_text    ->  model_type=voicing_convo
     Qwen3_5MoeForConditionalGeneration -> VoicingConvoForConditionalGeneration
 
-Transformers' ``@auto_docstring`` also ``print``s ``[ERROR] ... not documented``
-lines for those upstream classes. Those are docstring lint, not load failures;
-they are dropped on stdout/stderr so they never reach the container log.
+Anything still matching ``qwen`` (any case, any leftover spelling) becomes
+``voicing`` / ``Voicing`` / ``VOICING``. That includes errors, tracebacks,
+paths, and class names. Transformers' ``@auto_docstring`` ``print``s of
+``[ERROR] ... not documented`` are docstring lint, not load failures, and are
+dropped.
 
-Nothing in the engines is modified: this is a standard ``logging.Filter`` plus
-a stdio wrapper. It does not change behaviour, only the text that leaves the
-process.
+Nothing in the engines is modified: this is a ``logging.Filter``, a stdio
+wrapper, and a wrap of existing ``StreamHandler`` streams. It does not change
+behaviour, only the text that leaves the process.
 
 Set ``VOICING_REDACT_LOGS=0`` to turn it off, for example when reporting a bug
 upstream and you want the engine's own identifiers verbatim.
@@ -54,10 +56,20 @@ _DOCSTRING_LINT = re.compile(
 )
 
 
+def _voicing_case(match: re.Match[str]) -> str:
+    src = match.group(0)
+    if src.isupper():
+        return "VOICING"
+    if src[0].isupper():
+        return "Voicing"
+    return "voicing"
+
+
 def _redact(text: str) -> str:
     for pattern, replacement in _SUBS:
         text = pattern.sub(replacement, text)
-    return text
+    # Hard guarantee: no leftover vendor token, any spelling, any case.
+    return _ANY.sub(_voicing_case, text)
 
 
 def _drop_line(text: str) -> bool:
@@ -79,7 +91,16 @@ class VoicingLogFilter(logging.Filter):
             # everything it did before, just with the identifiers substituted.
             record.msg = _redact(message)
             record.args = ()
-        for attr in ("filename", "module", "name", "pathname"):
+        for attr in ("filename", "module", "name", "pathname", "funcName"):
+            value = getattr(record, attr, None)
+            if isinstance(value, str) and _ANY.search(value):
+                setattr(record, attr, _redact(value))
+        if record.exc_info and not record.exc_text:
+            try:
+                record.exc_text = logging.Formatter().formatException(record.exc_info)
+            except Exception:
+                pass
+        for attr in ("exc_text", "stack_info"):
             value = getattr(record, attr, None)
             if isinstance(value, str) and _ANY.search(value):
                 setattr(record, attr, _redact(value))
@@ -144,8 +165,16 @@ def install() -> bool:
     # And handlers created after this point.
     _patch_handler_init(f)
     _wrap_stdio()
+    _wrap_handler_streams()
+    _patch_stream_handler()
     _INSTALLED = True
     return True
+
+
+def _wrap_stream(stream: TextIO | None) -> TextIO | None:
+    if stream is None or isinstance(stream, _FilteredStream):
+        return stream
+    return _FilteredStream(stream)
 
 
 def _wrap_stdio() -> None:
@@ -153,6 +182,46 @@ def _wrap_stdio() -> None:
         sys.stdout = _FilteredStream(sys.stdout)  # type: ignore[assignment]
     if not isinstance(sys.stderr, _FilteredStream):
         sys.stderr = _FilteredStream(sys.stderr)  # type: ignore[assignment]
+
+
+def _wrap_handler_streams() -> None:
+    """Handlers created before install() still hold the original stderr."""
+    seen: set[int] = set()
+    handlers = list(logging.getLogger().handlers)
+    for logger in list(logging.Logger.manager.loggerDict.values()):
+        if isinstance(logger, logging.Logger):
+            handlers.extend(logger.handlers)
+    for handler in handlers:
+        stream = getattr(handler, "stream", None)
+        if stream is None or id(stream) in seen:
+            continue
+        seen.add(id(stream))
+        try:
+            handler.stream = _wrap_stream(stream)
+        except Exception:
+            pass
+
+
+def _patch_stream_handler() -> None:
+    if getattr(logging.StreamHandler, "_voicing_stream_patched", False):
+        return
+    original_init = logging.StreamHandler.__init__
+
+    def __init__(self, stream=None):
+        original_init(self, stream)
+        try:
+            self.stream = _wrap_stream(self.stream)
+        except Exception:
+            pass
+
+    logging.StreamHandler.__init__ = __init__  # type: ignore[method-assign]
+    original_set = getattr(logging.StreamHandler, "setStream", None)
+    if original_set is not None:
+        def setStream(self, stream):
+            return original_set(self, _wrap_stream(stream))
+
+        logging.StreamHandler.setStream = setStream  # type: ignore[method-assign]
+    logging.StreamHandler._voicing_stream_patched = True  # type: ignore[attr-defined]
 
 
 def _attach_everywhere(f: logging.Filter) -> None:
