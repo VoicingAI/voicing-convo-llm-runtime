@@ -1,0 +1,2 @@
+# Executed by site.py at interpreter start, before sglang/vllm/transformers.
+import voicing_runtime.logfilter as _voicing_logfilter; _voicing_logfilter.install()

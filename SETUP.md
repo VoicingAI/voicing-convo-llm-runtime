@@ -304,9 +304,10 @@ and logs what it found. The runtime registers a detection rule for this model,
 so it reports `reasoning_parser=voicing, tool_call_parser=voicing` and
 `--reasoning-parser auto` resolves correctly.
 
-**vLLM and SGLang are redacted at the logging layer.** Kernel module filenames,
-warm-up messages, compiled custom-op names, and PascalCase class names are
-rewritten on the way out by a `logging.Filter` plus a stdout/stderr wrapper.
+**vLLM and SGLang are redacted at the logging layer.** A `.pth` file installs
+the filter at interpreter start (before transformers imports). Kernel module
+filenames, warm-up messages, compiled custom-op names, PascalCase class names,
+`print()`s, and leftover `qwen` tokens are rewritten or dropped.
 Nothing in the engines is modified. The substitution keeps the meaningful part
 so lines stay traceable:
 

@@ -22,9 +22,13 @@ paths, and class names. Transformers' ``@auto_docstring`` ``print``s of
 ``[ERROR] ... not documented`` are docstring lint, not load failures, and are
 dropped.
 
+A ``voicing_runtime.pth`` runs ``install()`` at interpreter start, before
+SGLang/vLLM import transformers. ``builtins.print`` is wrapped so those
+``print()``s cannot bypass stdout.
+
 Nothing in the engines is modified: this is a ``logging.Filter``, a stdio
-wrapper, and a wrap of existing ``StreamHandler`` streams. It does not change
-behaviour, only the text that leaves the process.
+wrapper, a ``print`` wrapper, and a wrap of existing ``StreamHandler``
+streams. It does not change behaviour, only the text that leaves the process.
 
 Set ``VOICING_REDACT_LOGS=0`` to turn it off, for example when reporting a bug
 upstream and you want the engine's own identifiers verbatim.
@@ -32,6 +36,7 @@ upstream and you want the engine's own identifiers verbatim.
 
 from __future__ import annotations
 
+import builtins
 import logging
 import os
 import re
@@ -52,7 +57,8 @@ _SUBS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 _ANY = re.compile(r"(?i)qwen")
 _DOCSTRING_LINT = re.compile(
-    r"^\[ERROR\] `[^`]+` is part of \S+'s signature, but not documented\."
+    r"^\[ERROR\].*not documented",
+    re.IGNORECASE,
 )
 
 
@@ -167,6 +173,7 @@ def install() -> bool:
     _wrap_stdio()
     _wrap_handler_streams()
     _patch_stream_handler()
+    _wrap_builtin_print()
     _INSTALLED = True
     return True
 
@@ -175,6 +182,37 @@ def _wrap_stream(stream: TextIO | None) -> TextIO | None:
     if stream is None or isinstance(stream, _FilteredStream):
         return stream
     return _FilteredStream(stream)
+
+
+def _filter_print_text(text: str) -> str | None:
+    kept: list[str] = []
+    for line in text.split("\n"):
+        if _drop_line(line):
+            continue
+        kept.append(_redact(line) if _ANY.search(line) else line)
+    if not kept:
+        return None
+    return "\n".join(kept)
+
+
+def _wrap_builtin_print() -> None:
+    """Catch ``print(..., file=...)`` that never touches sys.stdout."""
+    current = builtins.print
+    if getattr(current, "_voicing_redact", False):
+        return
+    orig = current
+
+    def print(*args, sep=" ", end="\n", file=None, flush=False):  # noqa: A001
+        if args:
+            filtered = _filter_print_text(sep.join(map(str, args)))
+            if filtered is None:
+                return
+            args = (filtered,)
+            sep = " "
+        return orig(*args, sep=sep, end=end, file=file, flush=flush)
+
+    print._voicing_redact = True  # type: ignore[attr-defined]
+    builtins.print = print  # type: ignore[assignment]
 
 
 def _wrap_stdio() -> None:

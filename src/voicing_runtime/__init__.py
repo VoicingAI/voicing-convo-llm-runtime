@@ -16,4 +16,4 @@ no changes to engine source.
 from .register import ARCH, MODEL_TYPE, register, registered
 
 __all__ = ["ARCH", "MODEL_TYPE", "register", "registered"]
-__version__ = "1.0.3"
+__version__ = "1.0.4"

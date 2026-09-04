@@ -23,6 +23,8 @@ HERE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+# Capture before logfilter.install() wraps builtins.print / stdout.
+_REAL_PRINT = print
 results = []
 
 
@@ -151,6 +153,40 @@ def _handler_stream_captured_before_install():
     assert "voicing" in out.lower(), out
 
 
+def _builtin_print_to_foreign_file_is_dropped():
+    """Transformers print()s before plugins load, sometimes with file=."""
+    from voicing_runtime import logfilter as lf
+
+    lf._INSTALLED = False
+    os.environ.pop("VOICING_REDACT_LOGS", None)
+    buf = io.StringIO()
+    qwen2 = (
+        "[ERROR] `loss` is part of Qwen2_5MoeCausalLMOutputWithPast.__init__'s "
+        "signature, but not documented. Make sure to add it to the docstring of "
+        "the function in /usr/lib/python3.13/site-packages/transformers/models/"
+        "qwen2_5_moe/modeling_qwen2_5_moe.py."
+    )
+    try:
+        assert lf.install()
+        print("\n".join([qwen2, DOC_ERR_VL]), file=buf)
+        print("server ready", file=buf)
+    finally:
+        lf._INSTALLED = False
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+    out = buf.getvalue()
+    _assert_no_qwen(out)
+    assert "not documented" not in out, out
+    assert "server ready" in out, out
+
+
+def _pth_bootstraps_install():
+    pth = os.path.join(HERE, "voicing_runtime.pth")
+    assert os.path.isfile(pth), pth
+    text = open(pth, encoding="utf-8").read()
+    assert "logfilter" in text and "install()" in text, text
+
+
 def _stderr_and_exc_have_no_qwen():
     from voicing_runtime import logfilter as lf
 
@@ -181,9 +217,11 @@ if __name__ == "__main__":
     check("logging.Filter: drop docstring lint records", _logging_drops_docstring_lint)
     check("StreamHandler attached before install() still redacts", _handler_stream_captured_before_install)
     check("stderr / traceback writes have no leftover qwen", _stderr_and_exc_have_no_qwen)
+    check("builtins.print(file=...) drops HF docstring lint", _builtin_print_to_foreign_file_is_dropped)
+    check("pth file installs the filter at interpreter start", _pth_bootstraps_install)
     failed = 0
     for ok, name, info in results:
-        print(("ok   " if ok else "FAIL ") + name + (f"  {info}" if info else ""))
+        _REAL_PRINT(("ok   " if ok else "FAIL ") + name + (f"  {info}" if info else ""), file=sys.__stdout__)
         failed += not ok
-    print(f"{sum(ok for ok, _, _ in results)}/{len(results)} passed")
+    _REAL_PRINT(f"{sum(ok for ok, _, _ in results)}/{len(results)} passed", file=sys.__stdout__)
     sys.exit(1 if failed else 0)
