@@ -12,6 +12,8 @@ from sglang.srt.parser.reasoning_parser import (
     ReasoningParser,
 )
 
+from .._engine_api import _accepted_kwargs
+
 
 class VoicingReasoningDetector(BaseReasoningFormatDetector):
     """
@@ -43,9 +45,7 @@ class VoicingReasoningDetector(BaseReasoningFormatDetector):
             "<|im_end|>",
             "<|endoftext|>",
         ]
-        super().__init__(
-            "<think>",
-            "</think>",
+        kwargs = dict(
             think_excluded_tokens=think_excluded_tokens,
             force_reasoning=force_reasoning,
             stream_reasoning=stream_reasoning,
@@ -58,6 +58,10 @@ class VoicingReasoningDetector(BaseReasoningFormatDetector):
             reasoning_default="enable_thinking",
             force_nonempty_content=force_nonempty_content,
         )
+        # The base gains keyword arguments between releases -- 0.5.16 added
+        # force_nonempty_content, which 0.5.15 has no parameter for. Forward
+        # only what this engine's base actually accepts.
+        super().__init__("<think>", "</think>", **_accepted_kwargs(super().__init__, kwargs))
 
 
 # --- Registration -----------------------------------------------------------

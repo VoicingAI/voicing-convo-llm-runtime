@@ -28,6 +28,8 @@ from __future__ import annotations
 import importlib.util
 import logging
 
+from ._engine_api import _engine_version, _pick
+
 ARCH = "VoicingConvoForCausalLM"
 MODEL_TYPE = "voicing_convo"
 
@@ -104,15 +106,37 @@ if _installed("sglang"):
     from sglang.srt.models.qwen3_5 import Qwen3_5MoeForCausalLM as _SglInner
     from sglang.srt.models.qwen3_5 import Qwen3_5MoeForConditionalGeneration as _SglVL
     from sglang.srt.models.registry import ModelRegistry as _SglRegistry
-    from sglang.srt.utils.hf_transformers import common as _sgl_hf_common
-
-    # Helpers whose module path moves between releases: take them from the
-    # engine's own model module, which has already imported them.
     from sglang.srt.models import qwen3_5 as _sgl_q35
 
-    _SglPPMissingLayer = _sgl_q35.PPMissingLayer
-    _sgl_add_prefix = _sgl_q35.add_prefix
-    _sgl_get_server_args = _sgl_q35.get_server_args
+    _SglPPMissingLayer = _pick(
+        "sglang", "PPMissingLayer",
+        (_sgl_q35, "PPMissingLayer"),
+        ("sglang.srt.layers.utils", "PPMissingLayer"),
+        ("sglang.srt.layers.utils.common", "PPMissingLayer"),
+        ("sglang.srt.utils", "PPMissingLayer"),
+    )
+    _sgl_add_prefix = _pick(
+        "sglang", "add_prefix",
+        (_sgl_q35, "add_prefix"),
+        ("sglang.srt.utils", "add_prefix"),
+        ("sglang.srt.utils.common", "add_prefix"),
+    )
+    # Renamed get_global_server_args -> get_server_args; both names are live in
+    # the wild, so accept either from either module.
+    _sgl_get_server_args = _pick(
+        "sglang", "server-args accessor",
+        (_sgl_q35, "get_server_args"),
+        (_sgl_q35, "get_global_server_args"),
+        ("sglang.srt.server_args", "get_server_args"),
+        ("sglang.srt.server_args", "get_global_server_args"),
+    )
+    # Resolve the registry dict itself, not its module: mutating the dict works
+    # no matter which module happens to own it in this release.
+    _sgl_config_registry = _pick(
+        "sglang", "HF config registry",
+        ("sglang.srt.utils.hf_transformers.common", "_CONFIG_REGISTRY"),
+        ("sglang.srt.utils.hf_transformers_utils", "_CONFIG_REGISTRY"),
+    )
 
     class SglVoicingConvoForCausalLM(nn.Module):
         """Standalone text-only entry class for SGLang.
@@ -149,7 +173,7 @@ if _installed("sglang"):
                         config.vocab_size,
                         config.hidden_size,
                         quant_config=quant_config,
-                        use_attn_tp_group=_sgl_get_server_args().enable_dp_lm_head,
+                        use_attn_tp_group=getattr(_sgl_get_server_args(), "enable_dp_lm_head", False),
                         prefix=_sgl_add_prefix("lm_head", prefix),
                     )
             else:
@@ -159,7 +183,8 @@ if _installed("sglang"):
             # The engine's loader reads these; mirror the vision wrapper's logic
             # (shared-expert fusion is an AMD/aiter-only path).
             self.num_fused_shared_experts = 0
-            if getattr(_sgl_q35, "_use_aiter", False) and not _sgl_q35._disable_shared_experts_fusion():
+            _disable_fusion = getattr(_sgl_q35, "_disable_shared_experts_fusion", None)
+            if getattr(_sgl_q35, "_use_aiter", False) and _disable_fusion is not None and not _disable_fusion():
                 self.num_fused_shared_experts = _SglVL._get_num_fused_shared_experts(self)
             self.enable_shared_expert_fusion = self.num_fused_shared_experts > 0
 
@@ -220,7 +245,7 @@ if _installed("sglang"):
     # model_type -> config class. SGLang consults its own registry before
     # transformers' AutoConfig, so this is the only place it needs to be; the
     # AutoConfig mapping stays on the transformers subclass for transformers users.
-    _sgl_hf_common._CONFIG_REGISTRY[MODEL_TYPE] = SglVoicingConvoConfig
+    _sgl_config_registry[MODEL_TYPE] = SglVoicingConvoConfig
 
     # Template auto-detection. SGLang inspects the chat template to suggest a
     # reasoning and tool-call parser, and logs what it found. Without a rule of
@@ -260,7 +285,17 @@ if _installed("vllm"):
 
     # Resolve vLLM's text config through its own registry rather than by module
     # path: the class name/module moved between releases, the registry key did not.
-    _VllmTextConfig = _vllm_tu_config._CONFIG_REGISTRY["qwen3_5_moe_text"]
+    try:
+        _VllmTextConfig = _vllm_tu_config._CONFIG_REGISTRY[ENGINE_FAMILY]
+    except KeyError:
+        # Same failure mode the SGLang side guards against: report what is
+        # actually installed instead of a bare KeyError from inside a plugin.
+        raise ImportError(
+            "vtext-editor found no %r entry in vLLM's config "
+            "registry (vLLM %s). The base architecture this model builds on is "
+            "absent from this release; vLLM 0.28.0 or newer is required."
+            % (ENGINE_FAMILY, _engine_version("vllm"))
+        )
 
     class VllmVoicingConvoConfig(_VllmTextConfig):
         model_type = MODEL_TYPE
@@ -274,8 +309,13 @@ if _installed("vllm"):
     _vllm_tu_config._CONFIG_REGISTRY[MODEL_TYPE] = VllmVoicingConvoConfig
     # architecture -> model class (string form: no CUDA init at import time)
     _VllmRegistry.register_model(ARCH, "vllm.model_executor.models.qwen3_5:Qwen3_5MoeForCausalLM")
-    # per-architecture config hook: sets the Mamba cache dtype and strips M-RoPE
-    _vllm_models_config.MODELS_CONFIG_MAP[ARCH] = _vllm_models_config.Qwen3_5ForCausalLMConfig
+    # per-architecture config hook: sets the Mamba cache dtype and strips M-RoPE.
+    # Optional: without it the engine still runs, it just loses those defaults.
+    _vllm_arch_cfg = getattr(_vllm_models_config, "Qwen3_5ForCausalLMConfig", None)
+    if _vllm_arch_cfg is not None:
+        _vllm_models_config.MODELS_CONFIG_MAP[ARCH] = _vllm_arch_cfg
+    else:  # pragma: no cover
+        log.warning("vLLM per-architecture config hook unavailable; using engine defaults")
     # Triton/FLA kernel warm-up is keyed on model_type; opt in (performance only)
     try:
         from vllm.model_executor.warmup import qwen_triton_warmup as _w

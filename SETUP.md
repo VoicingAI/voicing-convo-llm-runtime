@@ -27,7 +27,7 @@ engine source is modified and nothing is pip-installed.
 | | |
 |---|---|
 | GPU | 96 GB for `TP=1` at 64K context (bf16 weights are 69.3 GB). Smaller cards need `TP=2` or more. |
-| Engine | SGLang `0.5.16`, or vLLM `0.28.0`. Both verified. On Blackwell use CUDA 12.8+ builds. |
+| Engine | SGLang `0.5.15`-`0.5.16`, or vLLM `0.28.0`. All verified. On Blackwell use CUDA 12.8+ builds. |
 | Python | 3.12, in the engine's own environment |
 | Model access | `HF_TOKEN` with read access to the private model repo |
 | Runtime access | credentials for the private GitHub repo (token, SSH deploy key, or a copied checkout) |
@@ -371,7 +371,28 @@ docs/PARSERS.md      how each engine resolves parsers, and why
 ## Versioning
 
 The parsers and the registration code are written against the released engine
-sources they were verified on: **SGLang 0.5.16** and **vLLM 0.28.0**. Both take
-their engine-side pieces from stable entry points, but an engine upgrade can
-still move an internal API. After bumping an engine, run `voicing-check` and the
-section 4 suites before sending traffic. They fail loudly and name what moved.
+sources they were verified on: **SGLang 0.5.15-0.5.16** and **vLLM 0.28.0**.
+Both take their engine-side pieces from stable entry points, but an engine
+upgrade can still move an internal API. After bumping an engine, run
+`voicing-check` and the section 4 suites before sending traffic. They fail
+loudly and name what moved.
+
+A few engine internals we borrow are private, and move or get renamed between
+point releases. SGLang 0.5.16's `qwen3_5` re-exports the server-args accessor
+as `get_server_args`, 0.5.15's exports it under no name at all, and in both the
+canonical `sglang.srt.server_args` calls it `get_global_server_args`; the HF
+config registry likewise gained a second home at `hf_transformers.common`
+alongside `hf_transformers_utils`. Base classes also gain keyword arguments:
+0.5.16 added `force_nonempty_content` to `BaseReasoningFormatDetector`, which
+0.5.15 has no parameter for.
+
+Rather than bind to one location, `voicing_runtime._engine_api` resolves both
+kinds of drift at import time: `_pick` tries every location we have seen for a
+helper, and `_accepted_kwargs` forwards only the keyword arguments the installed
+base actually accepts. To support a newer release, add its location to the
+relevant candidate list.
+
+If `_pick` matches nothing it raises an ImportError naming the helper, the
+engine version, and every place it looked -- so an unsupported engine reports
+itself directly, instead of surfacing later as a confusing
+`--reasoning-parser: invalid choice: 'voicing'` from argparse.

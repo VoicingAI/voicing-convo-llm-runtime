@@ -59,7 +59,7 @@ docs/PARSERS.md      how each engine resolves parsers, and why
 
 | Engine | Version | Pre-flight | Live smoke test |
 |---|---|---|---|
-| SGLang | 0.5.16 | 3/3 + 12/12 + 33/33 | 6/6 |
+| SGLang | 0.5.15-0.5.16 | 3/3 + 12/12 + 33/33 | 6/6 |
 | vLLM | 0.28.0 | 3/3 + 5/5 + 33/33 | 6/6 |
 
 An engine upgrade can move an internal API. Run `voicing-check` and the suites
