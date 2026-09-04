@@ -14,9 +14,15 @@ meaningful part rather than inventing a new name, so log lines stay traceable:
     Warming up Qwen Triton kernels ->  Warming up GDN Triton kernels
     vllm::qwen_gdn_attention_core  ->  vllm::gdn_attention_core
     model_type=qwen3_5_moe_text    ->  model_type=voicing_convo
+    Qwen3_5MoeForConditionalGeneration -> VoicingConvoForConditionalGeneration
 
-Nothing in the engines is modified: this is a standard `logging.Filter` on the
-root logger. It does not change behaviour, only the text of log records.
+Transformers' ``@auto_docstring`` also ``print``s ``[ERROR] ... not documented``
+lines for those upstream classes. Those are docstring lint, not load failures;
+they are dropped on stdout/stderr so they never reach the container log.
+
+Nothing in the engines is modified: this is a standard ``logging.Filter`` plus
+a stdio wrapper. It does not change behaviour, only the text that leaves the
+process.
 
 Set ``VOICING_REDACT_LOGS=0`` to turn it off, for example when reporting a bug
 upstream and you want the engine's own identifiers verbatim.
@@ -27,17 +33,25 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
+from typing import TextIO
 
-# Longest first: qwen3_5_moe_text must win over qwen3.
+# Longest first: qwen3_5_moe_text must win over qwen3. PascalCase class names
+# (Qwen3_5Moe...) are rewritten before the lowercase path fragments.
 _SUBS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"qwen3_5_moe_text|qwen3_5_moe|qwen3_5"), "voicing_convo"),
-    (re.compile(r"qwen_gdn"), "gdn"),
-    (re.compile(r"Qwen Triton"), "GDN Triton"),
-    (re.compile(r"qwen_triton_warmup"), "gdn_triton_warmup"),
-    (re.compile(r"qwen3_coder"), "voicing"),
-    (re.compile(r"\bqwen3\b"), "voicing"),
+    (re.compile(r"Qwen3_5Moe"), "VoicingConvo"),
+    (re.compile(r"qwen3_5_moe_text|qwen3_5_moe|qwen3_5", re.IGNORECASE), "voicing_convo"),
+    (re.compile(r"qwen2_5_vl", re.IGNORECASE), "voicing_convo"),
+    (re.compile(r"qwen_gdn", re.IGNORECASE), "gdn"),
+    (re.compile(r"Qwen Triton", re.IGNORECASE), "GDN Triton"),
+    (re.compile(r"qwen_triton_warmup", re.IGNORECASE), "gdn_triton_warmup"),
+    (re.compile(r"qwen3_coder", re.IGNORECASE), "voicing"),
+    (re.compile(r"\bqwen3\b", re.IGNORECASE), "voicing"),
 )
 _ANY = re.compile(r"(?i)qwen")
+_DOCSTRING_LINT = re.compile(
+    r"^\[ERROR\] `[^`]+` is part of \S+'s signature, but not documented\."
+)
 
 
 def _redact(text: str) -> str:
@@ -46,14 +60,20 @@ def _redact(text: str) -> str:
     return text
 
 
+def _drop_line(text: str) -> bool:
+    return bool(_DOCSTRING_LINT.search(text.lstrip("\n")))
+
+
 class VoicingLogFilter(logging.Filter):
-    """Rewrite vendor identifiers in log records. Never drops a record."""
+    """Rewrite vendor identifiers in log records. Drops HF docstring lint."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             message = record.getMessage()
         except Exception:
             return True
+        if _drop_line(message):
+            return False
         if _ANY.search(message):
             # Collapse msg+args into the redacted text; the record still carries
             # everything it did before, just with the identifiers substituted.
@@ -66,11 +86,45 @@ class VoicingLogFilter(logging.Filter):
         return True
 
 
+class _FilteredStream:
+    """Line-buffer a text stream: drop docstring lint, redact vendor names."""
+
+    def __init__(self, inner: TextIO) -> None:
+        self._inner = inner
+        self._buf = ""
+
+    def write(self, data) -> int:
+        if not isinstance(data, str):
+            return self._inner.write(data)
+        self._buf += data
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            self._emit(line)
+        return len(data)
+
+    def _emit(self, line: str) -> None:
+        if _drop_line(line):
+            return
+        if _ANY.search(line):
+            line = _redact(line)
+        self._inner.write(line + "\n")
+
+    def flush(self) -> None:
+        if self._buf:
+            leftover, self._buf = self._buf, ""
+            if not _drop_line(leftover):
+                self._inner.write(_redact(leftover) if _ANY.search(leftover) else leftover)
+        self._inner.flush()
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
+
+
 _INSTALLED = False
 
 
 def install() -> bool:
-    """Attach the filter to the root logger and every existing handler.
+    """Attach the filter to logging and wrap stdout/stderr.
 
     Idempotent. Returns True if the filter is active in this process.
     """
@@ -89,8 +143,16 @@ def install() -> bool:
 
     # And handlers created after this point.
     _patch_handler_init(f)
+    _wrap_stdio()
     _INSTALLED = True
     return True
+
+
+def _wrap_stdio() -> None:
+    if not isinstance(sys.stdout, _FilteredStream):
+        sys.stdout = _FilteredStream(sys.stdout)  # type: ignore[assignment]
+    if not isinstance(sys.stderr, _FilteredStream):
+        sys.stderr = _FilteredStream(sys.stderr)  # type: ignore[assignment]
 
 
 def _attach_everywhere(f: logging.Filter) -> None:

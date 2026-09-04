@@ -304,16 +304,19 @@ and logs what it found. The runtime registers a detection rule for this model,
 so it reports `reasoning_parser=voicing, tool_call_parser=voicing` and
 `--reasoning-parser auto` resolves correctly.
 
-**vLLM is redacted at the logging layer.** Its kernel module filenames, warm-up
-message, and compiled custom-op names are rewritten on the way out by a
-`logging.Filter` the runtime installs. Nothing in vLLM is modified. The
-substitution keeps the meaningful part so lines stay traceable:
+**vLLM and SGLang are redacted at the logging layer.** Kernel module filenames,
+warm-up messages, compiled custom-op names, and PascalCase class names are
+rewritten on the way out by a `logging.Filter` plus a stdout/stderr wrapper.
+Nothing in the engines is modified. The substitution keeps the meaningful part
+so lines stay traceable:
 
-| vLLM writes | you see |
+| engine / transformers writes | you see |
 |---|---|
 | `[qwen_gdn_linear_attn.py:158]` | `[gdn_linear_attn.py:158]` |
 | `Warming up Qwen Triton kernels for model_type=qwen3_5_moe_text` | `Warming up GDN Triton kernels for model_type=voicing_convo` |
 | `vllm::qwen_gdn_attention_core` | `vllm::gdn_attention_core` |
+| `Load weight end. type=Qwen3_5MoeForConditionalGeneration` | `Load weight end. type=VoicingConvoForConditionalGeneration` |
+| `[ERROR] \`loss\` is part of Qwen3_5Moe... not documented` | *(dropped — docstring lint, not a load failure)* |
 
 Verified: a full startup log from either engine contains zero matches for the
 vendor name.
